@@ -133,7 +133,7 @@ You can contribute by creating issues, feature requests or merge requests.
 
 ISC License
 
-Copyright (c) 2013 Marcin Nowak
+Copyright (c) 2023 Marcin Nowak
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above
