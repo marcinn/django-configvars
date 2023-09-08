@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 README_PATH = os.path.join(os.path.dirname(__file__), "README.md")
 
 setup(
-    name="django-easysettings",
+    name="django-configvars",
     version="0.1",
     description="Custom settings management for Django",
     classifiers=[
@@ -27,7 +27,7 @@ setup(
     ],
     author="Marcin Nowak",
     author_email="marcin.j.nowak@gmail.com",
-    url="https://gitlab.com/marcinjn/django-easysettings",
+    url="https://gitlab.com/marcinjn/django-configvars",
     keywords="web python django config settings",
     packages=find_packages("."),
     include_package_data=True,
