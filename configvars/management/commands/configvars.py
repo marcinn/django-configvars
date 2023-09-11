@@ -25,11 +25,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         info = options["comments"]
         for var in get_config_variables():
-            value = getattr(settings, var.name, None)
-            if options["changed"] and not var.default == value:
+            if options["changed"] and var.default == var.value:
                 continue
             if options["defaults"]:
                 value = var.default
+            else:
+                value = var.value
 
             comment = ""
             if info:

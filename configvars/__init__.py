@@ -1,26 +1,44 @@
 import dataclasses
+import importlib
 import os
 import typing
+from pathlib import Path
 
 __all__ = ["initialize", "config", "as_bool", "as_list", "secret"]
+
+DEFAULT_LOCAL_SETTINGS_MODULE_NAME = "local"
 
 
 @dataclasses.dataclass
 class ConfigVariable:
     name: str
+    value: typing.Any = None
     desc: str = ""
     default: typing.Any = None
 
 
-LOCAL = object()
+LOCAL = None
 ENV_PREFIX = ""
 ALL_CONFIGVARS = {}
 
 
-def initialize(settings_local=None, env_prefix=""):
+def initialize(local_settings_module=None, env_prefix=""):
     global LOCAL, ENV_PREFIX
 
-    LOCAL = settings_local or object()
+    if not local_settings_module:
+        base_path = os.getenv("DJANGO_SETTINGS_MODULE").split(".")[:-1]
+        base_path.append(DEFAULT_LOCAL_SETTINGS_MODULE_NAME)
+        _local_settings_module = ".".join(base_path)
+    else:
+        _local_settings_module = local_settings_module
+
+    try:
+        LOCAL = importlib.import_module(_local_settings_module)
+    except ImportError:
+        if local_settings_module:
+            raise
+        else:
+            LOCAL = object()
     ENV_PREFIX = get_local("ENV_PREFIX", env_prefix)
 
 
@@ -33,8 +51,12 @@ def getenv(envvar, default=None):
 
 
 def config(var, default=None, desc=None):
+    if LOCAL is None:
+        initialize()
     value = getenv(var, get_local(var, default))
-    ALL_CONFIGVARS[var] = ConfigVariable(name=var, desc=desc, default=default)
+    ALL_CONFIGVARS[var] = ConfigVariable(
+        name=var, desc=desc, value=value, default=default
+    )
     return value
 
 
@@ -62,6 +84,8 @@ def as_bool(value):
 
 
 def secret(key, default=None):
+    if LOCAL is None:
+        initialize()
     value = getenv(key, get_local(key, default))
     if not value:
         return value  # "" or None
