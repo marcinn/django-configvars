@@ -30,25 +30,44 @@ INSTALLED_APPS = [
 ]
 ```
 
-### Extended configuration (with `local` settings module)
+### Quickstart
 
 In your `settings.py` add these lines at the top of the file:
 
 ```python
+from convigvars import config, secret
 
-from convigvars import config, secret, initialize
-
-try:
-    from . import local as settings_local  # you can use any module name for local settings
-except ImportError:
-    settings_local = object()
-
-initialize(settings_local)
+SOME_API_KEY = config("SOME_API_KEY", "default_api_key")
+SOME_API_SECRET = secret("SOME_API_SECRET", "")
 ```
 
-Create empty `local.py` module near your `settings.py` for customizing config variables.
+Then use local settings to set these values or pass them by environment
+variables. To use local file, add these settings to `local.py` file in
+the same folder where `settings.py` file is located, and fill it with:
 
-As local config variables are specific to a local machine, consider adding `local.py` to `.gitignore`.
+```
+SOME_API_KEY = "NEW_API_KEY"
+SOME_API_SECRET = "NEW_API_SECRET"
+```
+
+To check if they are apllied propely run `manage.py configvars`.
+
+You can override these settings by using environment vars (i.e. for
+deployment in containers). To do so just declare an environment variable
+as usual:
+
+```
+SOME_API_KEY="ENV_API_KEY" manage.py configvars
+```
+
+In case of secrets, you should provide a path to the secret file
+containing a value:
+
+```
+SOME_API_SECRET="/run/secrets/SOME_API_SECRET" manage.py configvars
+```
+
+If file does not exist, the path will be interpreted as typical string value.
 
 ## Usage
 
@@ -110,6 +129,48 @@ $ python manage.py configvars --comment
 MY_CUSTOM_VARIABLE = 'default_value'  # Set's custom variable
 ```
 
+### Local settings
+
+Django Configvars will try to import `<projectname>.local` module by
+default. By using this file you can customize your config variables -
+they will be used as current values.
+
+To do so, create empty `local.py` in directory where your `settings.py` file
+is located, then assign values to your variables.
+
+*As local config variables are specific to a local machine, consider adding `local.py` to `.gitignore`.*
+
+Note that:
+* Local settings can be overriden by environment variables
+* Local settings can be skipped for your project
+
+To change location or name of your local settings file, you must
+initialize Django Configvars explicitely in `settings.py` module:
+
+```
+from configvars import initialize
+
+initialize("other.location.of.settings_local")
+```
+
+### Environment variables
+
+Django Config vars will check at the first whether environment name of
+the variable is defined. It is important for deployments in containers,
+where configuration variables are passed mostly by environment variables.
+
+If environment variable does not exist, a local variable will be
+used. If local value is not defined, a default value will be used.
+
+Environment variables can be prefixed to solve issues with eventual name
+conflicts. To do so you must initialize Django Configvars explicitely in
+`settings.py` file:
+
+```
+from configvars import initialize
+
+initialize(env_prefix="MYPREFIX_")
+```
 
 ## Support
 
@@ -146,4 +207,3 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
-
