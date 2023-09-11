@@ -6,7 +6,7 @@ README_PATH = os.path.join(os.path.dirname(__file__), "README.md")
 
 setup(
     name="django-configvars",
-    version="0.2",
+    version="0.2-2",
     description="Custom settings management for Django",
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -32,6 +32,6 @@ setup(
     packages=find_packages("."),
     include_package_data=True,
     zip_safe=True,
-    # long_description=open(README_PATH).read(),
-    # long_description_content_type="text/markdown",
+    long_description=open(README_PATH).read(),
+    long_description_content_type="text/markdown",
 )
