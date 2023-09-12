@@ -1,12 +1,18 @@
 import dataclasses
 import importlib
+import logging
 import os
 import typing
-from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 __all__ = ["initialize", "config", "as_bool", "as_list", "secret"]
 
 DEFAULT_LOCAL_SETTINGS_MODULE_NAME = "local"
+default_app_config = "configvars.apps.ConfigVarsAppConfig"
+
+
+log = logging.getLogger("configvars")
 
 
 @dataclasses.dataclass
@@ -18,12 +24,13 @@ class ConfigVariable:
 
 
 LOCAL = None
+LOCAL_MODULE_IMPORT_FAILED = None
 ENV_PREFIX = ""
 ALL_CONFIGVARS = {}
 
 
 def initialize(local_settings_module=None, env_prefix=""):
-    global LOCAL, ENV_PREFIX
+    global LOCAL, ENV_PREFIX, LOCAL_MODULE_IMPORT_FAILED
 
     if not local_settings_module:
         base_path = os.getenv("DJANGO_SETTINGS_MODULE").split(".")[:-1]
@@ -34,11 +41,19 @@ def initialize(local_settings_module=None, env_prefix=""):
 
     try:
         LOCAL = importlib.import_module(_local_settings_module)
-    except ImportError:
+    except AttributeError as exc:
+        raise ImproperlyConfigured(
+            "Ensure that `local_settings_module` argument of `initialize()` "
+            "function is a string containing a dotted module path."
+        ) from exc
+    except ImportError as exc:
         if local_settings_module:
-            raise
+            raise ImproperlyConfigured(
+                f"Can't import local settings module {local_settings_module}"
+            ) from exc
         else:
             LOCAL = object()
+            LOCAL_MODULE_IMPORT_FAILED = _local_settings_module
     ENV_PREFIX = get_local("ENV_PREFIX", env_prefix)
 
 
