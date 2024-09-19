@@ -6,7 +6,7 @@ README_PATH = os.path.join(os.path.dirname(__file__), "README.md")
 
 setup(
     name="django-configvars",
-    version="0.2-2",
+    version="0.3",
     description="Custom settings management for Django",
     classifiers=[
         "Development Status :: 4 - Beta",
