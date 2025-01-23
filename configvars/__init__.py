@@ -102,14 +102,13 @@ def secret(key, default=None):
     if LOCAL is None:
         initialize()
     value = getenv(key, get_local(key, default))
-    if value:
-        return value
+    if not value:
+        return value  # "" or None
 
     if os.path.isfile(value):
         with open(value) as f:
             return f.read()
-
-    return None
+    return value
 
 
 def get_config_variables():
