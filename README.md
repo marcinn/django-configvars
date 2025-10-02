@@ -9,6 +9,7 @@ Configure your Django project in easy and readable way.
 ![PyPI - License](https://img.shields.io/pypi/l/django-configvars)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/django-configvars)
 ![GitHub last commit](https://img.shields.io/github/last-commit/marcinn/django-configvars)
+![Tests](https://github.com/marcinn/django-configvars/actions/workflows/tests.yml/badge.svg)
 ![Libraries.io dependency status for latest release](https://img.shields.io/librariesio/release/pypi/django-configvars)
 
 ## Description
