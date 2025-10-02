@@ -1,4 +1,4 @@
-# Django Convigvars
+# Django ConfigVars
 
 Configure your Django project in easy and readable way.
 
@@ -15,6 +15,7 @@ Configure your Django project in easy and readable way.
 ## Description
 
 Configvars gives possibility to configure Django-based project with local file and environment variables (i.e. for Docker containers).
+Configvars uses a single global configuration registry; the module-level helpers (`initialize`, `config`, `secret`) operate on this singleton.
 
 Environmental variables are the most important. If not set, the variables from the `local` module will be used, or if these are not present either - the default values will be used:
 
@@ -70,14 +71,15 @@ as usual:
 SOME_API_KEY="ENV_API_KEY" manage.py configvars
 ```
 
-In case of secrets, you should provide a path to the secret file
-containing a value:
+Secrets passed by environment variables should be set as literal values:
 
 ```
-SOME_API_SECRET="/run/secrets/SOME_API_SECRET" manage.py configvars
+SOME_API_SECRET="ENV_API_SECRET" manage.py configvars
 ```
 
-If file does not exist, the path will be interpreted as typical string value.
+For file-based secrets (for example Docker Swarm / Portainer), use
+`*_FILE` variables and `secret(..., file_var=...)` in `settings.py`
+(see `Handling Secrets` below).
 
 ## Usage
 
@@ -99,13 +101,46 @@ DATABASES = {
 }
 ```
 
+### Handling Secrets
+
+`secret()` hides the secret value in config dumps. To read a secret from a
+file, pass the name of a separate variable with `file_var`.
+
+```python
+DB_PASSWORD = secret("DB_PASSWORD", file_var="DB_PASSWORD_FILE")
+```
+
+For multiline secrets (for example PEM blocks), enable it explicitly:
+
+```python
+TLS_KEY = secret("TLS_KEY", file_var="TLS_KEY_FILE", allow_multiline=True)
+```
+
+Example values (with `initialize(env_prefix="APP_")`):
+
+```bash
+# local / .env
+APP_DB_PASSWORD="plain-password"
+
+# Docker Swarm / Portainer
+APP_DB_PASSWORD_FILE="/run/secrets/db_password"
+```
+
+If both variables are set, `secret()` raises `ImproperlyConfigured`.
+If `*_FILE` is set and the file does not exist, `secret()` raises
+`ImproperlyConfigured`.
+By default file-based secrets must be single-line (`allow_multiline=False`)
+and oversized files are rejected.
+In `manage.py configvars` output, configured secret values are shown as
+`"*****"` (while `None` / empty values remain visible as `None` / `""`).
+
 ### Show configurable variables for your project
 
 ```bash
 python manage.py configvars
 ```
 
-Should result in something like that:
+Example output (an unset secret is shown as `None`, a configured one is shown as `"*****"`):
 
 ```
 DB_NAME = 'example'
@@ -113,6 +148,12 @@ DB_USER = 'postgres'
 DB_PASSWORD = None
 DB_HOST = 'localhost'
 DB_PORT = 5432
+```
+
+When the secret is configured, it is masked:
+
+```
+DB_PASSWORD = '*****'
 ```
 
 ### Show only changed config variables

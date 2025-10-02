@@ -1,0 +1,19 @@
+{%- if versions %}
+<div role="note" aria-label="versions">
+  <h3>{{ _('Versions') }}</h3>
+  {%- if latest_version is defined and latest_version %}
+    {%- set latest_name = latest_version.name %}
+    {%- set latest_url = latest_version.url %}
+    {%- if current_version is defined and current_version.name != latest_name %}
+      {%- set latest_url = latest_url.replace('/' ~ latest_name ~ '/', '/latest/') %}
+    {%- endif %}
+    <select onchange="if (this.value) window.location.href=this.value;" aria-label="{{ _('Version selector') }}">
+      <option value="{{ latest_url }}">latest</option>
+    </select>
+  {%- elif current_version is defined %}
+    <select onchange="if (this.value) window.location.href=this.value;" aria-label="{{ _('Version selector') }}">
+      <option value="index.html">latest</option>
+    </select>
+  {%- endif %}
+</div>
+{%- endif %}
