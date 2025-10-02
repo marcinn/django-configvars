@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 import configvars
-from configvars import as_bool, as_list
+from configvars import Config, as_bool, as_list
 
 
 @contextmanager
@@ -40,45 +40,48 @@ def temporary_module(module_name, **attrs):
 
 
 def reset_default_config():
-    configvars.LOCAL = None
+    default = configvars.DEFAULT_CONFIG
+    default._local_settings_module = None
+    default._env_prefix = None
+    default._all_configvars = {}
+    default._local = None
+    default._import_module_failed = False
+    default._initialized = False
     configvars.LOCAL_MODULE_IMPORT_FAILED = None
-    configvars.ENV_PREFIX = ""
-    configvars.ALL_CONFIGVARS = {}
 
 
 @contextmanager
 def config_value(module_name, env, key, default=None, **local_attrs):
-    reset_default_config()
     with temporary_module(module_name, **local_attrs):
+        cfg = Config()
         with patch.dict(os.environ, env, clear=True):
-            configvars.initialize(local_settings_module=module_name)
-            yield configvars.config(key, default)
+            cfg.initialize(local_settings_module=module_name)
+            yield cfg.config(key, default)
 
 
 @contextmanager
 def env_prefix_result():
-    reset_default_config()
     with temporary_module("prefproj.local", FOO="local"):
+        cfg = Config()
         with patch.dict(os.environ, {"APP_FOO": "env", "FOO": "wrong"}, clear=True):
-            configvars.initialize(
-                local_settings_module="prefproj.local", env_prefix="APP_"
-            )
-            value = configvars.config("FOO", "default")
-            yield configvars.ENV_PREFIX, value
+            cfg.initialize(local_settings_module="prefproj.local", env_prefix="APP_")
+            value = cfg.config("FOO", "default")
+            yield cfg.ENV_PREFIX, value
 
 
 @contextmanager
 def secret_result():
-    reset_default_config()
     with temporary_module("secretproj.local"):
+        cfg = Config()
         temp = tempfile.NamedTemporaryFile("w+", delete=False)
         try:
             temp.write("topsecret")
             temp.flush()
             with patch.dict(os.environ, {"SECRET": temp.name}, clear=True):
-                configvars.initialize(local_settings_module="secretproj.local")
-                value = configvars.secret("SECRET")
-                yield value
+                cfg.initialize(local_settings_module="secretproj.local")
+                value = cfg.secret("SECRET")
+                var = list(cfg.config_variables())[0]
+                yield value, var
         finally:
             temp.close()
             os.unlink(temp.name)
@@ -89,8 +92,8 @@ def wrapper_vars():
     reset_default_config()
     with temporary_module("wrapproj.local", FOO="local"):
         with patch.dict(os.environ, {}, clear=True):
-            configvars.initialize(local_settings_module="wrapproj.local")
-            configvars.config("FOO", "default", desc="desc")
+            configvars.initialize(settings_module="wrapproj.local")
+            configvars.config("FOO", "default")
             yield list(configvars.get_config_variables())
 
 
@@ -110,14 +113,14 @@ def local_settings_warnings():
 
 class ConfigVarsTests(unittest.TestCase):
     def test_initialize_raises_for_invalid_module_type(self):
-        reset_default_config()
+        cfg = Config()
         with self.assertRaises(configvars.ImproperlyConfigured):
-            configvars.initialize(local_settings_module=123)
+            cfg.initialize(local_settings_module=123)
 
     def test_initialize_raises_for_missing_explicit_module(self):
-        reset_default_config()
+        cfg = Config()
         with self.assertRaises(configvars.ImproperlyConfigured):
-            configvars.initialize(local_settings_module="missing.module")
+            cfg.initialize(local_settings_module="missing.module")
 
     def test_config_precedence_env_over_local(self):
         with config_value(
@@ -141,8 +144,17 @@ class ConfigVarsTests(unittest.TestCase):
         with env_prefix_result() as (_, value):
             self.assertEqual(value, "env")
 
-    def test_config_calls_initialize_when_uninitialized(self):
-        reset_default_config()
+    def test_local_calls_initialize_when_uninitialized(self):
+        cfg = Config()
+        with patch.dict(
+            os.environ, {"DJANGO_SETTINGS_MODULE": "lazyproj.settings"}, clear=True
+        ):
+            sys.modules.pop("lazyproj", None)
+            sys.modules.pop("lazyproj.local", None)
+            self.assertEqual(cfg.local("FOO", "default"), "default")
+
+    def test_env_calls_initialize_when_uninitialized(self):
+        cfg = Config()
         with patch.dict(
             os.environ,
             {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "FOO": "env"},
@@ -150,14 +162,48 @@ class ConfigVarsTests(unittest.TestCase):
         ):
             sys.modules.pop("lazyproj", None)
             sys.modules.pop("lazyproj.local", None)
-            self.assertEqual(configvars.config("FOO", "default"), "env")
+            self.assertEqual(cfg.env("FOO", "default"), "env")
+
+    def test_config_calls_initialize_when_uninitialized(self):
+        cfg = Config()
+        with patch.dict(
+            os.environ,
+            {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "FOO": "env"},
+            clear=True,
+        ):
+            sys.modules.pop("lazyproj", None)
+            sys.modules.pop("lazyproj.local", None)
+            self.assertEqual(cfg.config("FOO", "default"), "env")
 
     def test_secret_reads_file_content(self):
-        with secret_result() as value:
+        with secret_result() as (value, _):
             self.assertEqual(value, "topsecret")
 
+    def test_secret_registers_name(self):
+        with secret_result() as (_, var):
+            self.assertEqual(var.name, "SECRET")
+
+    def test_secret_marks_secret(self):
+        with secret_result() as (_, var):
+            self.assertTrue(var.secret)
+
+    def test_secret_value_is_hidden(self):
+        with secret_result() as (_, var):
+            self.assertIsNone(var.value)
+
+    def test_secret_calls_initialize_when_uninitialized(self):
+        cfg = Config()
+        with patch.dict(
+            os.environ,
+            {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "SECRET": "plain"},
+            clear=True,
+        ):
+            sys.modules.pop("lazyproj", None)
+            sys.modules.pop("lazyproj.local", None)
+            self.assertEqual(cfg.secret("SECRET"), "plain")
+
     def test_secret_returns_empty_value(self):
-        reset_default_config()
+        cfg = Config()
         with patch.dict(
             os.environ,
             {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "SECRET": ""},
@@ -165,23 +211,18 @@ class ConfigVarsTests(unittest.TestCase):
         ):
             sys.modules.pop("lazyproj", None)
             sys.modules.pop("lazyproj.local", None)
-            self.assertEqual(configvars.secret("SECRET"), "")
+            self.assertEqual(cfg.secret("SECRET"), "")
 
     def test_secret_returns_non_file_value(self):
-        reset_default_config()
-        missing_path = os.path.join(
-            tempfile.gettempdir(), "configvars_missing_secret_value"
-        )
-        if os.path.isfile(missing_path):
-            os.unlink(missing_path)
+        cfg = Config()
         with patch.dict(
             os.environ,
-            {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "SECRET": missing_path},
+            {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "SECRET": "notafile"},
             clear=True,
         ):
             sys.modules.pop("lazyproj", None)
             sys.modules.pop("lazyproj.local", None)
-            self.assertEqual(configvars.secret("SECRET"), missing_path)
+            self.assertEqual(cfg.secret("SECRET"), "notafile")
 
     def test_as_list_splits_string(self):
         self.assertEqual(as_list("a,b"), ["a", "b"])
@@ -207,21 +248,24 @@ class ConfigVarsTests(unittest.TestCase):
     def test_as_bool_true_for_other_strings(self):
         self.assertTrue(as_bool("anything"))
 
-    def test_config_registers_variable_name(self):
+    def test_initialize_wrapper_registers_name(self):
         with wrapper_vars() as vars_list:
             self.assertEqual(vars_list[0].name, "FOO")
 
-    def test_config_registers_variable_value(self):
+    def test_initialize_wrapper_registers_value(self):
         with wrapper_vars() as vars_list:
             self.assertEqual(vars_list[0].value, "local")
 
-    def test_config_registers_variable_default(self):
-        with wrapper_vars() as vars_list:
-            self.assertEqual(vars_list[0].default, "default")
-
-    def test_config_registers_variable_desc(self):
-        with wrapper_vars() as vars_list:
-            self.assertEqual(vars_list[0].desc, "desc")
+    def test_secret_wrapper_returns_value(self):
+        reset_default_config()
+        with patch.dict(
+            os.environ,
+            {"DJANGO_SETTINGS_MODULE": "lazyproj.settings", "SECRET": "plain"},
+            clear=True,
+        ):
+            sys.modules.pop("lazyproj", None)
+            sys.modules.pop("lazyproj.local", None)
+            self.assertEqual(configvars.secret("SECRET"), "plain")
 
     def test_check_local_settings_warning_count(self):
         with local_settings_warnings() as warnings:
@@ -237,3 +281,60 @@ class ConfigVarsTests(unittest.TestCase):
         with patch.object(config_apps, "register") as register_mock:
             config_apps.ConfigVarsAppConfig("configvars", config_apps).ready()
             self.assertTrue(register_mock.called)
+
+
+class DualPrefixConfigTests(unittest.TestCase):
+    def setUp(self):
+        self._saved_modules = {}
+        for name in ("dualproj", "dualproj.local"):
+            if name in sys.modules:
+                self._saved_modules[name] = sys.modules[name]
+
+        if "dualproj" not in sys.modules:
+            module = types.ModuleType("dualproj")
+            module.__path__ = []
+            sys.modules["dualproj"] = module
+
+        if "dualproj.local" not in sys.modules:
+            mod_local = types.ModuleType("dualproj.local")
+            setattr(mod_local, "FOO", "default_bar")
+            sys.modules["dualproj.local"] = mod_local
+
+        self._env_patcher = patch.dict(
+            os.environ, {"APP_FOO": "alpha", "OTHER_FOO": "beta"}, clear=True
+        )
+        self._env_patcher.start()
+
+        self._cfg_first = Config()
+        self._cfg_first.initialize(
+            local_settings_module="dualproj.local", env_prefix="APP_"
+        )
+        self._cfg_second = Config()
+        self._cfg_second.initialize(
+            local_settings_module="dualproj.local", env_prefix="OTHER_"
+        )
+        self._cfg_third = Config()
+        self._cfg_third.initialize(
+            local_settings_module="dualproj.local", env_prefix="MISSING_"
+        )
+
+    def tearDown(self):
+        self._env_patcher.stop()
+
+        for name in ("dualproj.local", "dualproj"):
+            if name not in self._saved_modules:
+                sys.modules.pop(name, None)
+        for name, module in self._saved_modules.items():
+            sys.modules[name] = module
+
+    def test_using_prefixed_env_var_from_config(self):
+        value = self._cfg_first.config("FOO")
+        self.assertEqual(value, "alpha")
+
+    def test_using_prefixed_env_var_from_second_config(self):
+        value = self._cfg_second.config("FOO")
+        self.assertEqual(value, "beta")
+
+    def test_using_local_module_value_for_missing_prefix(self):
+        value = self._cfg_third.config("FOO")
+        self.assertEqual(value, "default_bar")

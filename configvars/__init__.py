@@ -6,7 +6,14 @@ import typing
 
 from django.core.exceptions import ImproperlyConfigured
 
-__all__ = ["initialize", "config", "as_bool", "as_list", "secret"]
+__all__ = [
+    "initialize",
+    "config",
+    "as_bool",
+    "as_list",
+    "secret",
+    "get_config_variables",
+]
 
 DEFAULT_LOCAL_SETTINGS_MODULE_NAME = "local"
 default_app_config = "configvars.apps.ConfigVarsAppConfig"
@@ -21,58 +28,92 @@ class ConfigVariable:
     value: typing.Any = None
     desc: str = ""
     default: typing.Any = None
+    secret: bool = False
 
 
-LOCAL = None
-LOCAL_MODULE_IMPORT_FAILED = None
-ENV_PREFIX = ""
-ALL_CONFIGVARS = {}
+class Config:
+    def __init__(self):
+        self._local_settings_module = None
+        self._env_prefix = None
+        self._all_configvars = {}
+        self._local = None
+        self._import_module_failed = False
+        self._initialized = False
 
+    @property
+    def ENV_PREFIX(self):
+        return self._env_prefix or ""
 
-def initialize(local_settings_module=None, env_prefix=""):
-    global LOCAL, ENV_PREFIX, LOCAL_MODULE_IMPORT_FAILED
+    def initialize(self, local_settings_module=None, env_prefix=None):
+        self._initialized = False
+        self._import_module_failed = False
 
-    if not local_settings_module:
-        base_path = os.getenv("DJANGO_SETTINGS_MODULE").split(".")[:-1]
-        base_path.append(DEFAULT_LOCAL_SETTINGS_MODULE_NAME)
-        _local_settings_module = ".".join(base_path)
-    else:
-        _local_settings_module = local_settings_module
+        if env_prefix is not None:
+            self._env_prefix = env_prefix
 
-    try:
-        LOCAL = importlib.import_module(_local_settings_module)
-    except AttributeError as exc:
-        raise ImproperlyConfigured(
-            "Ensure that `local_settings_module` argument of `initialize()` "
-            "function is a string containing a dotted module path."
-        ) from exc
-    except ImportError as exc:
-        if local_settings_module:
-            raise ImproperlyConfigured(
-                f"Can't import local settings module {local_settings_module}"
-            ) from exc
+        if not local_settings_module:
+            base_path = os.getenv("DJANGO_SETTINGS_MODULE").split(".")[:-1]
+            base_path.append(DEFAULT_LOCAL_SETTINGS_MODULE_NAME)
+            self._local_settings_module = ".".join(base_path)
         else:
-            LOCAL = object()
-            LOCAL_MODULE_IMPORT_FAILED = _local_settings_module
-    ENV_PREFIX = get_local("ENV_PREFIX", env_prefix)
+            self._local_settings_module = local_settings_module
 
+        try:
+            self._local = importlib.import_module(self._local_settings_module)
+        except AttributeError as exc:
+            raise ImproperlyConfigured(
+                "Ensure that `settings_module` argument of `__init__()` "
+                "function is a string containing a dotted module path."
+            ) from exc
+        except ImportError as exc:
+            if local_settings_module:  # if provided explicite
+                raise ImproperlyConfigured(
+                    f"Can't import local settings module " f"{local_settings_module}"
+                ) from exc
+            else:
+                self._local = object()
+                self._import_module_failed = self._local_settings_module
+                self._initialized = True
+        else:
+            # backward compatibility
+            self._initialized = True
 
-def get_local(key, default=None):
-    return getattr(LOCAL, key, default)
+    def local(self, key, default=None):
+        if not self._initialized:
+            self.initialize()
+        return getattr(self._local, key, default)
 
+    def env(self, key, default=None):
+        if not self._initialized:
+            self.initialize()
+        return os.getenv(f"{self.ENV_PREFIX}{key}", default)
 
-def getenv(envvar, default=None):
-    return os.getenv(f"{ENV_PREFIX}{envvar}", default)
+    def config(self, key, default=None, desc=None):
+        if not self._initialized:
+            self.initialize()
+        value = self.env(key, self.local(key, default))
+        self._all_configvars[key] = ConfigVariable(
+            name=key, desc=desc, value=value, default=default
+        )
+        return value
 
+    def secret(self, key, default=None, desc=None):
+        if not self._initialized:
+            self.initialize()
+        value = self.env(key, self.local(key, default))
+        self._all_configvars[key] = ConfigVariable(
+            name=key, desc=desc, default=default, secret=True
+        )
+        if not value:
+            return value  # "" or None
 
-def config(var, default=None, desc=None):
-    if LOCAL is None:
-        initialize()
-    value = getenv(var, get_local(var, default))
-    ALL_CONFIGVARS[var] = ConfigVariable(
-        name=var, desc=desc, value=value, default=default
-    )
-    return value
+        if os.path.isfile(value):
+            with open(value) as f:
+                return f.read()
+        return value
+
+    def config_variables(self):
+        return self._all_configvars.values()
 
 
 def as_list(value, separator=","):
@@ -98,18 +139,22 @@ def as_bool(value):
             return True
 
 
-def secret(key, default=None):
-    if LOCAL is None:
-        initialize()
-    value = getenv(key, get_local(key, default))
-    if not value:
-        return value  # "" or None
+DEFAULT_CONFIG = Config()
 
-    if os.path.isfile(value):
-        with open(value) as f:
-            return f.read()
-    return value
+
+def initialize(settings_module=None, env_prefix=None):
+    return DEFAULT_CONFIG.initialize(
+        local_settings_module=settings_module, env_prefix=env_prefix
+    )
+
+
+def config(var, default=None, desc=None):
+    return DEFAULT_CONFIG.config(key=var, default=default, desc=desc)
+
+
+def secret(var, default=None, desc=None):
+    return DEFAULT_CONFIG.secret(key=var, default=default, desc=desc)
 
 
 def get_config_variables():
-    return ALL_CONFIGVARS.values()
+    return DEFAULT_CONFIG.config_variables()
