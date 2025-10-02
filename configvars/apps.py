@@ -6,14 +6,14 @@ from django.core.checks import Warning, register
 
 def check_local_settings(app_configs, **kwargs):
     errors = []
-    from . import LOCAL_MODULE_IMPORT_FAILED
+    from . import default_config
 
-    if LOCAL_MODULE_IMPORT_FAILED:
-        path = LOCAL_MODULE_IMPORT_FAILED.replace(".", os.sep) + ".py"
+    if default_config._import_module_failed:
+        path = default_config._local_settings_module.replace(".", os.sep) + ".py"
         errors.append(
             Warning(
                 f"Local settings module is not defined nor default module "
-                f"exist.\nConsider adding `{LOCAL_MODULE_IMPORT_FAILED}` "
+                f"exist.\nConsider adding `{default_config._local_settings_module}` "
                 f"module to your project.\nFinally add `{path}` to your "
                 f"`.gitignore`."
             )

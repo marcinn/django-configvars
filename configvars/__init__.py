@@ -6,13 +6,23 @@ import typing
 
 from django.core.exceptions import ImproperlyConfigured
 
-__all__ = ["initialize", "config", "as_bool", "as_list", "secret"]
+__all__ = [
+    "initialize",
+    "config",
+    "as_bool",
+    "as_list",
+    "secret",
+    "get_config_variables",
+]
 
 DEFAULT_LOCAL_SETTINGS_MODULE_NAME = "local"
 default_app_config = "configvars.apps.ConfigVarsAppConfig"
 
 
 log = logging.getLogger("configvars")
+_MISSING = object()
+MASKED_SECRET_VALUE = "*****"
+MAX_SECRET_FILE_SIZE = 64 * 1024
 
 
 @dataclasses.dataclass
@@ -21,58 +31,147 @@ class ConfigVariable:
     value: typing.Any = None
     desc: str = ""
     default: typing.Any = None
+    secret: bool = False
 
 
-LOCAL = None
-LOCAL_MODULE_IMPORT_FAILED = None
-ENV_PREFIX = ""
-ALL_CONFIGVARS = {}
+class Config:
+    def __init__(self):
+        self._reset_state()
 
+    def _reset_state(self):
+        self._local_settings_module = None
+        self._env_prefix = None
+        self._all_configvars = {}
+        self._local = None
+        self._import_module_failed = False
+        self._initialized = False
 
-def initialize(local_settings_module=None, env_prefix=""):
-    global LOCAL, ENV_PREFIX, LOCAL_MODULE_IMPORT_FAILED
+    @property
+    def ENV_PREFIX(self):
+        return self._env_prefix or ""
 
-    if not local_settings_module:
-        base_path = os.getenv("DJANGO_SETTINGS_MODULE").split(".")[:-1]
-        base_path.append(DEFAULT_LOCAL_SETTINGS_MODULE_NAME)
-        _local_settings_module = ".".join(base_path)
-    else:
-        _local_settings_module = local_settings_module
+    def initialize(self, local_settings_module=None, env_prefix=None):
+        self._initialized = False
+        self._import_module_failed = False
+        self._all_configvars = {}
+        self._local = None
 
-    try:
-        LOCAL = importlib.import_module(_local_settings_module)
-    except AttributeError as exc:
-        raise ImproperlyConfigured(
-            "Ensure that `local_settings_module` argument of `initialize()` "
-            "function is a string containing a dotted module path."
-        ) from exc
-    except ImportError as exc:
-        if local_settings_module:
-            raise ImproperlyConfigured(
-                f"Can't import local settings module {local_settings_module}"
-            ) from exc
+        self._env_prefix = env_prefix
+
+        if not local_settings_module:
+            settings_module = os.getenv("DJANGO_SETTINGS_MODULE")
+            if not settings_module:
+                raise ImproperlyConfigured(
+                    "DJANGO_SETTINGS_MODULE environment variable is not set."
+                )
+            base_path = settings_module.split(".")[:-1]
+            base_path.append(DEFAULT_LOCAL_SETTINGS_MODULE_NAME)
+            self._local_settings_module = ".".join(base_path)
         else:
-            LOCAL = object()
-            LOCAL_MODULE_IMPORT_FAILED = _local_settings_module
-    ENV_PREFIX = get_local("ENV_PREFIX", env_prefix)
+            self._local_settings_module = local_settings_module
 
+        try:
+            self._local = importlib.import_module(self._local_settings_module)
+        except AttributeError as exc:
+            raise ImproperlyConfigured(
+                "Ensure that `local_settings_module` argument of `initialize()` "
+                "is a string containing a dotted module path."
+            ) from exc
+        except ImportError as exc:
+            if local_settings_module:  # if provided explicite
+                raise ImproperlyConfigured(
+                    f"Can't import local settings module " f"{local_settings_module}"
+                ) from exc
+            else:
+                self._local = object()
+                self._import_module_failed = self._local_settings_module
+                self._initialized = True
+        else:
+            # backward compatibility
+            self._initialized = True
 
-def get_local(key, default=None):
-    return getattr(LOCAL, key, default)
+    def local(self, key, default=None):
+        if not self._initialized:
+            self.initialize()
+        return getattr(self._local, key, default)
 
+    def env(self, key, default=None):
+        if not self._initialized:
+            self.initialize()
+        return os.getenv(f"{self.ENV_PREFIX}{key}", default)
 
-def getenv(envvar, default=None):
-    return os.getenv(f"{ENV_PREFIX}{envvar}", default)
+    def config(self, key, default=None, desc=None):
+        if not self._initialized:
+            self.initialize()
+        value = self.env(key, self.local(key, default))
+        self._all_configvars[key] = ConfigVariable(
+            name=key, desc=desc, value=value, default=default
+        )
+        return value
 
+    def secret(
+        self, key=None, default=None, desc=None, file_var=None, allow_multiline=False
+    ):
+        if not self._initialized:
+            self.initialize()
 
-def config(var, default=None, desc=None):
-    if LOCAL is None:
-        initialize()
-    value = getenv(var, get_local(var, default))
-    ALL_CONFIGVARS[var] = ConfigVariable(
-        name=var, desc=desc, value=value, default=default
-    )
-    return value
+        if key is None and file_var is None:
+            raise ImproperlyConfigured("Provide `key` or `file_var` to `secret()`.")
+
+        secret_name = key or file_var
+        value = _MISSING
+        file_value = _MISSING
+
+        if key is not None:
+            value = self.env(key, self.local(key, _MISSING))
+        if file_var is not None:
+            file_value = self.env(file_var, self.local(file_var, _MISSING))
+
+        if value is not _MISSING and file_value is not _MISSING:
+            raise ImproperlyConfigured(
+                f"Set only one of `{key}` or `{file_var}` for secret `{secret_name}`."
+            )
+
+        resolved_value = default
+        if file_value is not _MISSING:
+            if not file_value:
+                resolved_value = file_value
+            else:
+                if not os.path.isfile(file_value):
+                    raise ImproperlyConfigured(
+                        f"Secret file for `{secret_name}` does not exist: {file_value}"
+                    )
+                if os.path.getsize(file_value) > MAX_SECRET_FILE_SIZE:
+                    raise ImproperlyConfigured(
+                        f"Secret file for `{secret_name}` is too large: {file_value}"
+                    )
+                with open(file_value) as f:
+                    resolved_value = f.read()
+                if not allow_multiline and any(
+                    char in resolved_value for char in ("\n", "\r")
+                ):
+                    raise ImproperlyConfigured(
+                        f"Secret file for `{secret_name}` must be single-line."
+                    )
+        elif value is not _MISSING:
+            resolved_value = value
+
+        registry_value = resolved_value
+        if registry_value not in (None, ""):
+            registry_value = MASKED_SECRET_VALUE
+
+        self._all_configvars[secret_name] = ConfigVariable(
+            name=secret_name,
+            desc=desc,
+            default=default,
+            value=registry_value,
+            secret=True,
+        )
+
+        return resolved_value
+
+    def config_variables(self):
+        return self._all_configvars.values()
 
 
 def as_list(value, separator=","):
@@ -98,18 +197,28 @@ def as_bool(value):
             return True
 
 
-def secret(key, default=None):
-    if LOCAL is None:
-        initialize()
-    value = getenv(key, get_local(key, default))
-    if not value:
-        return value  # "" or None
+default_config = Config()
 
-    if os.path.isfile(value):
-        with open(value) as f:
-            return f.read()
-    return value
+
+def initialize(local_settings_module=None, env_prefix=None):
+    return default_config.initialize(
+        local_settings_module=local_settings_module, env_prefix=env_prefix
+    )
+
+
+def config(var, default=None, desc=None):
+    return default_config.config(key=var, default=default, desc=desc)
+
+
+def secret(var=None, default=None, desc=None, file_var=None, allow_multiline=False):
+    return default_config.secret(
+        key=var,
+        default=default,
+        desc=desc,
+        file_var=file_var,
+        allow_multiline=allow_multiline,
+    )
 
 
 def get_config_variables():
-    return ALL_CONFIGVARS.values()
+    return default_config.config_variables()
