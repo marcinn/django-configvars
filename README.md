@@ -2,6 +2,11 @@
 
 Configure your Django project in easy and readable way.
 
+![PyPI - Version](https://img.shields.io/pypi/v/django-configvars)
+![PyPI - Format](https://img.shields.io/pypi/format/django-configvars)
+![GitHub last commit](https://img.shields.io/github/last-commit/marcinn/django-configvars)
+![Libraries.io dependency status for latest release](https://img.shields.io/librariesio/release/pypi/django-configvars)
+
 ## Description
 
 Configvars gives possibility to configure Django-based project with local file and environment variables (i.e. for Docker containers).
