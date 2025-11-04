@@ -4,6 +4,10 @@ Configure your Django project in easy and readable way.
 
 ![PyPI - Version](https://img.shields.io/pypi/v/django-configvars)
 ![PyPI - Format](https://img.shields.io/pypi/format/django-configvars)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/django-configvars)
+![PyPI - Status](https://img.shields.io/pypi/status/django-configvars)
+![PyPI - License](https://img.shields.io/pypi/l/django-configvars)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/django-configvars)
 ![GitHub last commit](https://img.shields.io/github/last-commit/marcinn/django-configvars)
 ![Libraries.io dependency status for latest release](https://img.shields.io/librariesio/release/pypi/django-configvars)
 
