@@ -12,6 +12,8 @@ Configure your Django project in easy and readable way.
 ![Tests](https://github.com/marcinn/django-configvars/actions/workflows/tests.yml/badge.svg)
 ![Libraries.io dependency status for latest release](https://img.shields.io/librariesio/release/pypi/django-configvars)
 
+Documentation: <https://marcinn.github.io/django-configvars/>
+
 ## Description
 
 Configvars gives possibility to configure Django-based project with local file and environment variables (i.e. for Docker containers).
